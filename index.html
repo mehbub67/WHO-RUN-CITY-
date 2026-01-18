@@ -4,169 +4,150 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, user-scalable=no">
 <title>WHO RUN CITY</title>
-
 <style>
-html,body{
-  margin:0;
-  padding:0;
-  overflow:hidden;
-  background:#000;
-}
-#game{
+html,body{margin:0;overflow:hidden;background:#000}
+#game{width:100vw;height:100vh}
+#status{
   position:fixed;
-  width:100%;
-  height:100%;
+  top:10px;
+  left:10px;
+  color:#0f0;
+  font-family:monospace;
+  z-index:10;
 }
-
-/* MOBILE CONTROLS */
 .btn{
-  position:fixed;
-  bottom:20px;
-  width:64px;
-  height:64px;
+  position:fixed;bottom:20px;
+  width:60px;height:60px;
   border-radius:50%;
-  background:rgba(255,255,255,0.25);
-  color:#fff;
-  font-size:22px;
-  display:flex;
-  align-items:center;
-  justify-content:center;
-  user-select:none;
+  background:rgba(255,255,255,.25);
+  color:#fff;font-size:22px;
+  display:flex;align-items:center;justify-content:center;
 }
-#left{left:20px}
-#right{left:100px}
-#up{right:100px}
-#down{right:20px}
+#l{left:20px} #r{left:90px}
+#f{right:90px} #b{right:20px}
 </style>
 </head>
 
 <body>
+<div id="status">Starting...</div>
 <div id="game"></div>
 
-<div class="btn" id="left">◀</div>
-<div class="btn" id="right">▶</div>
-<div class="btn" id="up">▲</div>
-<div class="btn" id="down">▼</div>
+<div class="btn" id="l">◀</div>
+<div class="btn" id="r">▶</div>
+<div class="btn" id="f">▲</div>
+<div class="btn" id="b">▼</div>
 
 <script src="https://cdn.jsdelivr.net/npm/three@0.152.2/build/three.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/three@0.152.2/examples/js/loaders/GLTFLoader.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/three@0.152.2/examples/js/loaders/DRACOLoader.js"></script>
 
 <script>
-let scene,camera,renderer;
-let player,mixer,actions={},activeAction;
-let clock=new THREE.Clock();
+const status = t => document.getElementById("status").innerText = t;
+
+let scene = new THREE.Scene();
+scene.background = new THREE.Color(0x87ceeb);
+
+let camera = new THREE.PerspectiveCamera(60,innerWidth/innerHeight,0.1,1000);
+camera.position.set(0,5,10);
+
+let renderer = new THREE.WebGLRenderer({antialias:true});
+renderer.setSize(innerWidth,innerHeight);
+renderer.setPixelRatio(devicePixelRatio);
+document.getElementById("game").appendChild(renderer.domElement);
+
+scene.add(new THREE.AmbientLight(0xffffff,0.6));
+let sun = new THREE.DirectionalLight(0xffffff,1);
+sun.position.set(10,20,10);
+scene.add(sun);
+
+// DEBUG GROUND (MUST SHOW)
+let ground = new THREE.Mesh(
+  new THREE.PlaneGeometry(200,200),
+  new THREE.MeshStandardMaterial({color:0x555555})
+);
+ground.rotation.x = -Math.PI/2;
+scene.add(ground);
+
+// DRACO
+const draco = new THREE.DRACOLoader();
+draco.setDecoderPath("https://cdn.jsdelivr.net/npm/three@0.152.2/examples/js/libs/draco/");
+
+const loader = new THREE.GLTFLoader();
+loader.setDRACOLoader(draco);
+
+let player, mixer, idle, walk;
 let move={l:0,r:0,f:0,b:0};
 
-init();
-animate();
-
-function init(){
-  scene=new THREE.Scene();
-  scene.background=new THREE.Color(0x87ceeb);
-
-  camera=new THREE.PerspectiveCamera(
-    60,
-    window.innerWidth/window.innerHeight,
-    0.1,
-    1000
-  );
-  camera.position.set(0,4,8);
-
-  renderer=new THREE.WebGLRenderer({antialias:true});
-  renderer.setSize(window.innerWidth,window.innerHeight);
-  renderer.setPixelRatio(window.devicePixelRatio);
-  document.getElementById("game").appendChild(renderer.domElement);
-
-  scene.add(new THREE.AmbientLight(0xffffff,0.6));
-  const sun=new THREE.DirectionalLight(0xffffff,1);
-  sun.position.set(10,20,10);
-  scene.add(sun);
-
-  // GROUND
-  const ground=new THREE.Mesh(
-    new THREE.PlaneGeometry(500,500),
-    new THREE.MeshStandardMaterial({color:0x444444})
-  );
-  ground.rotation.x=-Math.PI/2;
-  scene.add(ground);
-
-  const loader=new THREE.GLTFLoader();
-
-  // CITY
-  loader.load("models/city.glb",g=>{
+status("Loading city...");
+loader.load(
+  "models/city.glb",
+  g=>{
     g.scene.scale.set(1,1,1);
+    g.scene.position.set(0,0,0);
     scene.add(g.scene);
-  });
+    status("City loaded");
+  },
+  undefined,
+  e=>status("City ERROR")
+);
 
-  // PLAYER + ANIMATION
-  loader.load("models/player.glb",g=>{
-    player=g.scene;
-    player.scale.set(1,1,1);
+status("Loading player...");
+loader.load(
+  "models/player.glb",
+  g=>{
+    player = g.scene;
+    player.scale.set(1,1,1);   // FORCE SCALE
     player.position.set(0,0,0);
     scene.add(player);
 
-    mixer=new THREE.AnimationMixer(player);
-    g.animations.forEach(a=>{
-      actions[a.name]=mixer.clipAction(a);
-    });
+    mixer = new THREE.AnimationMixer(player);
+    idle = mixer.clipAction(g.animations[0]);
+    walk = g.animations[1] ? mixer.clipAction(g.animations[1]) : idle;
+    idle.play();
 
-    // AUTO PICK ANIMATIONS
-    actions.Idle ? play("Idle") : play(Object.keys(actions)[0]);
-  });
+    status("Player loaded");
+  },
+  undefined,
+  e=>status("Player ERROR")
+);
 
-  bind("left","l");
-  bind("right","r");
-  bind("up","f");
-  bind("down","b");
+// TOUCH
+const bind=(id,k)=>{
+  let b=document.getElementById(id);
+  b.ontouchstart=e=>{e.preventDefault();move[k]=1};
+  b.ontouchend=e=>{e.preventDefault();move[k]=0};
+};
+bind("l","l");bind("r","r");bind("f","f");bind("b","b");
 
-  window.addEventListener("resize",resize);
-}
-
-function play(name){
-  if(activeAction) activeAction.fadeOut(0.2);
-  activeAction=actions[name];
-  if(activeAction){
-    activeAction.reset().fadeIn(0.2).play();
-  }
-}
-
-function bind(id,dir){
-  const b=document.getElementById(id);
-  b.ontouchstart=e=>{e.preventDefault();move[dir]=1};
-  b.ontouchend=e=>{e.preventDefault();move[dir]=0};
-}
-
+let clock = new THREE.Clock();
 function animate(){
   requestAnimationFrame(animate);
-  const dt=clock.getDelta();
+  let dt = clock.getDelta();
   if(mixer) mixer.update(dt);
 
   if(player){
-    let moving=move.f||move.b||move.l||move.r;
-    if(moving){
-      play(actions.Walk?"Walk":Object.keys(actions)[1]);
-      const s=0.1;
-      if(move.f) player.position.z-=s;
-      if(move.b) player.position.z+=s;
-      if(move.l) player.position.x-=s;
-      if(move.r) player.position.x+=s;
-    }else{
-      play(actions.Idle? "Idle":Object.keys(actions)[0]);
+    let moving = move.f||move.b||move.l||move.r;
+    if(moving && !walk.isRunning()){
+      idle.stop(); walk.play();
+    }
+    if(!moving && !idle.isRunning()){
+      walk.stop(); idle.play();
     }
 
-    camera.position.x=player.position.x;
-    camera.position.z=player.position.z+8;
+    let s=0.08;
+    if(move.f) player.position.z-=s;
+    if(move.b) player.position.z+=s;
+    if(move.l) player.position.x-=s;
+    if(move.r) player.position.x+=s;
+
+    camera.position.x = player.position.x;
+    camera.position.z = player.position.z + 10;
     camera.lookAt(player.position);
   }
 
   renderer.render(scene,camera);
 }
-
-function resize(){
-  camera.aspect=window.innerWidth/window.innerHeight;
-  camera.updateProjectionMatrix();
-  renderer.setSize(window.innerWidth,window.innerHeight);
-}
+animate();
 </script>
 </body>
 </html>
